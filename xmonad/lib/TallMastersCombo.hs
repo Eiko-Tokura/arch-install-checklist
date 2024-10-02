@@ -214,6 +214,81 @@ instance Message FocusedNextLayout
 data ChangeFocus = NextFocus | PrevFocus deriving (Read, Show)
 instance Message ChangeFocus
 
+handleMessage' i@(TMSCombineTwo f w1 w2 vsp nmaster delta frac layout1 layout2) m
+  -- messages that only traverse one level
+  | Just Shrink <- fromMessage m = return . Just $ TMSCombineTwo f w1 w2 vsp nmaster delta (max 0 $ frac-delta) layout1 layout2
+  | Just Expand <- fromMessage m = return . Just $ TMSCombineTwo f w1 w2 vsp nmaster delta (min 1 $ frac+delta) layout1 layout2
+  | Just (IncMasterN d) <- fromMessage m =
+      let w = w1++w2
+          nmasterNew = min (max 0 (nmaster+d)) (length w)
+          (w1',w2')  = splitAt nmasterNew w
+      in return . Just $ TMSCombineTwo f w1' w2' vsp nmasterNew delta frac layout1 layout2
+  | Just SwitchOrientation <- fromMessage m =
+          let m1 = if vsp then SomeMessage Col else SomeMessage Row
+          in
+          do mlayout1 <- handleMessage layout1 m1
+             mlayout2 <- handleMessage layout2 m1
+             return $ mergeSubLayouts  mlayout1 mlayout2 (TMSCombineTwo f w1 w2 (not vsp) nmaster delta frac layout1 layout2) True
+  | Just SwapSubMaster <- fromMessage m =
+      -- first get the submaster window
+      let subMaster = listToMaybe w2
+      in case subMaster of
+          Just mw -> do windows $ W.modify' $ swapWindow mw
+                        return Nothing
+          Nothing -> return Nothing
+  | Just FocusSubMaster <- fromMessage m =
+      -- first get the submaster window
+      let subMaster = listToMaybe w2
+      in case subMaster of
+          Just mw -> do windows $ W.modify' $ focusWindow mw
+                        return Nothing
+          Nothing -> return Nothing
+  | Just NextFocus <- fromMessage m =
+      do
+        -- All toggle message is passed to the sublayout with focused window
+        mst <- gets (W.stack . W.workspace . W.current . windowset)
+        let nextw = adjFocus f mst True
+        case nextw of Nothing -> return Nothing
+                      Just w  -> do windows $ W.modify' $ focusWindow w
+                                    return Nothing
+  | Just PrevFocus <- fromMessage m =
+      do
+        -- All toggle message is passed to the sublayout with focused window
+        mst <- gets (W.stack . W.workspace . W.current . windowset)
+        let prevw = adjFocus f mst False
+        case prevw of Nothing -> return Nothing
+                      Just w  -> do windows $ W.modify' $ focusWindow w
+                                    return Nothing
+  -- messages that traverse recursively
+  | Just Row <- fromMessage m =
+      do mlayout1 <- handleMessage layout1 (SomeMessage Col)
+         mlayout2 <- handleMessage layout2 (SomeMessage Col)
+         return $ mergeSubLayouts mlayout1 mlayout2 (TMSCombineTwo f w1 w2 False nmaster delta frac layout1 layout2) True
+  | Just Col <- fromMessage m =
+      do mlayout1 <- handleMessage layout1 (SomeMessage Row)
+         mlayout2 <- handleMessage layout2 (SomeMessage Row)
+         return $ mergeSubLayouts mlayout1 mlayout2 (TMSCombineTwo f w1 w2 True nmaster delta frac layout1 layout2) True
+  | Just FocusedNextLayout <- fromMessage m =
+     do
+     -- All toggle message is passed to the sublayout with focused window
+       mst <- gets (W.stack . W.workspace . W.current . windowset)
+       let focId = findFocused mst w1 w2
+           m1 = if vsp then SomeMessage Row else SomeMessage Col
+       if focId == 1
+         then do
+               mlay1 <- handleMessages layout1 [SomeMessage NextLayout, m1]
+               let mlay2 = Nothing
+               return $ mergeSubLayouts mlay1 mlay2 i True
+         else do
+               let mlay1 = Nothing
+               mlay2 <- handleMessages layout2 [SomeMessage NextLayout, m1]
+               return $ mergeSubLayouts mlay1 mlay2 i True
+  | otherwise =
+          do
+            mlayout1 <- handleMessage layout1 m
+            mlayout2 <- handleMessage layout2 m
+            return $ mergeSubLayouts mlayout1 mlayout2 i False
+
 -- instance (Typeable l1, Typeable l2, LayoutClass l1 Window, LayoutClass l2 Window) => LayoutClass (TMSCombineTwo l1 l2) Window where
 instance (GetFocused l1 Window, GetFocused l2 Window) => LayoutClass (TMSCombineTwo l1 l2) Window where
   description _ = "TallMasters"
@@ -233,82 +308,32 @@ instance (GetFocused l1 Window, GetFocused l2 Window) => LayoutClass (TMSCombine
              (f2, _) = getFocused newlayout2 s2
              fnew = f1 ++ f2
          return (ws++ws', Just $ TMSCombineTwo fnew slst1 slst2 vsp nmaster delta frac newlayout1 newlayout2)
-
-
-  handleMessage i@(TMSCombineTwo f w1 w2 vsp nmaster delta frac layout1 layout2) m
-    -- messages that only traverse one level
-    | Just Shrink <- fromMessage m = return . Just $ TMSCombineTwo f w1 w2 vsp nmaster delta (max 0 $ frac-delta) layout1 layout2
-    | Just Expand <- fromMessage m = return . Just $ TMSCombineTwo f w1 w2 vsp nmaster delta (min 1 $ frac+delta) layout1 layout2
-    | Just (IncMasterN d) <- fromMessage m =
-        let w = w1++w2
-            nmasterNew = min (max 0 (nmaster+d)) (length w)
-            (w1',w2')  = splitAt nmasterNew w
-        in return . Just $ TMSCombineTwo f w1' w2' vsp nmasterNew delta frac layout1 layout2
-    | Just SwitchOrientation <- fromMessage m =
-            let m1 = if vsp then SomeMessage Col else SomeMessage Row
-            in
-            do mlayout1 <- handleMessage layout1 m1
-               mlayout2 <- handleMessage layout2 m1
-               return $ mergeSubLayouts  mlayout1 mlayout2 (TMSCombineTwo f w1 w2 (not vsp) nmaster delta frac layout1 layout2) True
-    | Just SwapSubMaster <- fromMessage m =
-        -- first get the submaster window
-        let subMaster = listToMaybe w2
-        in case subMaster of
-            Just mw -> do windows $ W.modify' $ swapWindow mw
-                          return Nothing
-            Nothing -> return Nothing
-    | Just FocusSubMaster <- fromMessage m =
-        -- first get the submaster window
-        let subMaster = listToMaybe w2
-        in case subMaster of
-            Just mw -> do windows $ W.modify' $ focusWindow mw
-                          return Nothing
-            Nothing -> return Nothing
-    | Just NextFocus <- fromMessage m =
-        do
-          -- All toggle message is passed to the sublayout with focused window
-          mst <- gets (W.stack . W.workspace . W.current . windowset)
-          let nextw = adjFocus f mst True
-          case nextw of Nothing -> return Nothing
-                        Just w  -> do windows $ W.modify' $ focusWindow w
-                                      return Nothing
-    | Just PrevFocus <- fromMessage m =
-        do
-          -- All toggle message is passed to the sublayout with focused window
-          mst <- gets (W.stack . W.workspace . W.current . windowset)
-          let prevw = adjFocus f mst False
-          case prevw of Nothing -> return Nothing
-                        Just w  -> do windows $ W.modify' $ focusWindow w
-                                      return Nothing
-    -- messages that traverse recursively
-    | Just Row <- fromMessage m =
-        do mlayout1 <- handleMessage layout1 (SomeMessage Col)
-           mlayout2 <- handleMessage layout2 (SomeMessage Col)
-           return $ mergeSubLayouts mlayout1 mlayout2 (TMSCombineTwo f w1 w2 False nmaster delta frac layout1 layout2) True
-    | Just Col <- fromMessage m =
-        do mlayout1 <- handleMessage layout1 (SomeMessage Row)
-           mlayout2 <- handleMessage layout2 (SomeMessage Row)
-           return $ mergeSubLayouts mlayout1 mlayout2 (TMSCombineTwo f w1 w2 True nmaster delta frac layout1 layout2) True
-    | Just FocusedNextLayout <- fromMessage m =
-       do
-       -- All toggle message is passed to the sublayout with focused window
-         mst <- gets (W.stack . W.workspace . W.current . windowset)
-         let focId = findFocused mst w1 w2
-             m1 = if vsp then SomeMessage Row else SomeMessage Col
-         if focId == 1
-           then do
-                 mlay1 <- handleMessages layout1 [SomeMessage NextLayout, m1]
-                 let mlay2 = Nothing
-                 return $ mergeSubLayouts mlay1 mlay2 i True
-           else do
-                 let mlay1 = Nothing
-                 mlay2 <- handleMessages layout2 [SomeMessage NextLayout, m1]
-                 return $ mergeSubLayouts mlay1 mlay2 i True
-    | otherwise =
-            do
-              mlayout1 <- handleMessage layout1 m
-              mlayout2 <- handleMessage layout2 m
-              return $ mergeSubLayouts mlayout1 mlayout2 i False
+  
+  handleMessage i@(TMSCombineTwo f w1 w2 vsp nmaster delta frac layout1 layout2) m = do
+    mst <- gets (W.stack . W.workspace . W.current . windowset)
+    let focId = findFocused mst w1 w2
+    if focId == 2 && shouldBeRecursivelyHandled m
+      then do
+        mlay2 <- handleMessage layout2 m
+        case (mlay2, shouldBeTriedByGlobalIfRightDidNotResponse m) of
+          (Nothing, True) -> handleMessage' i m
+          _               -> return $ mergeSubLayouts Nothing mlay2 i True
+      else handleMessage' i m
+    where shouldBeRecursivelyHandled m
+            | Just Shrink <- fromMessage m = True
+            | Just Expand <- fromMessage m = True
+            | Just (IncMasterN _) <- fromMessage m = True
+            | Just SwitchOrientation <- fromMessage m = True
+            | Just FocusedNextLayout <- fromMessage m = True
+            | Just SwapSubMaster <- fromMessage m = True
+            | otherwise = False
+          shouldBeTriedByGlobalIfRightDidNotResponse m
+            | Just Shrink <- fromMessage m = True
+            | Just Expand <- fromMessage m = True
+            | Just FocusedNextLayout <- fromMessage m = True
+            | Just SwitchOrientation <- fromMessage m = True
+            | Just SwapSubMaster <- fromMessage m = True
+            | otherwise = False
 
 -- | Swap a given window with the focused window.
 swapWindow :: (Eq a) => a -> Stack a -> Stack a

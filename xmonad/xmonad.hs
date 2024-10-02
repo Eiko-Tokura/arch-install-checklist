@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies     #-}
-import XMonad
+import XMonad -- hiding ((|||))
 import XMonad.Actions.WindowBringer
 import XMonad.Actions.ShowText
 import XMonad.Actions.Submap
@@ -104,7 +104,7 @@ home :: String
 home = "/home/eiko/"
 
 -- Border colors for unfocused and focused windows, respectively.
-myNormalBorderColor  = "#efefef"
+myNormalBorderColor  = "#121212"
 myFocusedBorderColor = "#66aaff"
 
 -- path to find background pictures
@@ -148,9 +148,12 @@ getTouchPadId = "xinput list | grep 'Touchpad' | awk '{print $5} {print $6}' | g
 myRaiseVolume am = spawn $ "pactl set-sink-volume @DEFAULT_SINK@ +" ++ am ++ "%"
 myLowerVolume am = spawn $ "pactl set-sink-volume @DEFAULT_SINK@ -" ++ am ++ "%"
 
-xmobarColorStr = xmobarColorLight
+xmobarColorStr = xmobarColorDark
 xmobarColorLight = "CC8899"
 xmobarColorDark = "000000"
+
+remote = "AsukaB550"
+syncDocuments = "rclone bisync /home/eiko/Documents/ " ++ remote ++ ":/home/eiko/Documents/ --resilient --recover --conflict-resolve newer"
 
 -----------------------------------------------------------------------
 -- You can use the ChangeConfig module to change the configuration of your software easily and systematically
@@ -310,6 +313,7 @@ myKeys conf@(XConfig {XMonad.modMask = modm}) = M.fromList $
         , ((0, xK_h), myTerminal ++ terminalExecutionFlag ++ " htop")
         , ((0, xK_k), myTerminal)
         , ((0, xK_p), "pavucontrol")
+        , ((0, xK_o), myTerminal ++ terminalExecutionFlag ++ syncDocuments)
         , ((0, xK_y), myTerminal ++ terminalExecutionFlag ++ " yazi")
         , ((0, xK_s), myTerminal ++ terminalExecutionFlag ++ " sudo pacman -Syu")
         , ((0, xK_x), myTerminal ++ terminalExecutionFlag ++ " nvim ~/.xmonad/xmonad.hs")
@@ -318,8 +322,8 @@ myKeys conf@(XConfig {XMonad.modMask = modm}) = M.fromList $
     -- power options 
     , ((modm,               xK_Delete), visualSubmap def . M.fromList . map (\(k, hint, job) -> (k, (hint, job))) $      
         [ ((0, xK_p), "poweroff",  spawn "poweroff")
-        , ((0, xK_s), "suspend",   spawn "loginctl suspend")
-        , ((0, xK_h), "hibernate", spawn "loginctl hibernate")
+        , ((0, xK_s), "suspend",   spawn "systemctl suspend")
+        , ((0, xK_h), "hibernate", spawn "systemctl hibernate")
         , ((0, xK_l), "lock",      spawn "slock")
         , ((0, xK_r), "reboot",    spawn "reboot")
         , ((0, xK_o), "logout xmonad", io exitSuccess)
@@ -344,11 +348,14 @@ myKeys conf@(XConfig {XMonad.modMask = modm}) = M.fromList $
     -- Rotate through the available layout algorithms
     , ((modm,               xK_Escape ), sendMessage NextLayout)
 
-    -- Resize viewed windows to the correct size
-    --, ((modm,               xK_n     ), refresh)
+    -- Change next layout for the focused window
+    , ((modm,               xK_u     ), sendMessage FocusedNextLayout)
     --
     -- Move focus to the next main window
     , ((modm,               xK_n     ), sendMessage NextFocus)
+
+    -- Move focus to the previous main window
+    , ((modm .|. shiftMask, xK_n     ), sendMessage PrevFocus)
 
     -- Move focus to the recent workspace
     , ((modm,               xK_Tab   ), toggleRecentNonEmptyWS)
@@ -498,29 +505,24 @@ myMouseBindings (XConfig {XMonad.modMask = modm}) = M.fromList
 
 ------------------------------------------------------------------------
 -- Layouts:
-myLayout  =   gridGrid
-          ||| gridAccord
-          ||| myGrid
-          ||| gridTabbed
+myLayout  =   flex2Col
           ||| flex3Col
-          ||| myTabbed 
+          ||| myGrid
           ||| Full
-          -- = layoutSet `flexCombineV` layoutSet
-          -- |||| flex3Col
-          -- |||| Full
   where
      layoutSet  = myGrid |||| Accordion |||| myTabbed
+     flex2Col   = nameLayout "Flex2Col"   $ tmsCombineTwo True 1 delta (1/2) layoutSet layoutSet
      myGrid     = nameLayout "GridR"      $ GridRatio 1.3
-     gridAccord = nameLayout "GridAccord" $ myGrid `flexCombineV` Accordion 
-     gridGrid   = nameLayout "GridGrid"   $ myGrid `flexCombineV` myGrid 
-     gridTabbed = nameLayout "GridTabbed" $ myGrid `flexCombineV` myTabbed 
-     threeCol   = ThreeColMid nmaster delta 0.45
+     -- gridAccord = nameLayout "GridAccord" $ myGrid `flexCombineV` Accordion 
+     -- gridGrid   = nameLayout "GridGrid"   $ myGrid `flexCombineV` myGrid 
+     -- gridTabbed = nameLayout "GridTabbed" $ myGrid `flexCombineV` myTabbed 
+     -- threeCol   = ThreeColMid nmaster delta 0.45
      flex3Col   = nameLayout "Flex3Col"   
-        $ tmsCombineTwo True 1 delta (1/3) 
-          myGrid
+        $ tmsCombineTwo True 1 delta (1/3)
+          layoutSet
           (tmsCombineTwo True 1 delta (1/2) layoutSet layoutSet)
                                     
-     tiled      = Tall nmaster delta ratio
+     -- tiled      = Tall nmaster delta ratio
 
      myTabbed = tabbed shrinkText def { activeColor = myFocusedBorderColor
                                       , activeBorderColor = "#FFFFFF"
@@ -537,9 +539,9 @@ myLayout  =   gridGrid
      ratio   = 1/2
 
      -- Percent of screen to increment by when resizing panes
-     delta   = 3/100
+     delta   = 1/34
 
-     nameLayout string = renamed [Replace string] 
+     nameLayout string = renamed [Replace string]
      --combineLayouts ratio lay1 lay2 = layoutN 1 (relBox 0 0 ratio 1) Nothing lay1 (layoutAll (relBox (1-ratio) 0 1 1) lay2)
      --evenCombine lay1 lay2 = combineLayouts 0.5 lay1 lay2
 
@@ -653,7 +655,7 @@ myLogHook = colorSaved
 myStartupHook = do
     --startUpCleanUp      -- Clean .viewedDocs
     setConfig $ IncreaseBrightness 0 -- set the brightness to the default value
-    spawnOnce defaultDisplaySetting -- set the default resolution
+    --spawnOnce defaultDisplaySetting -- set the default resolution
     spawn "killall trayer" -- kill trayer
     spawn ("sleep 2 && trayer --edge top --align right --widthtype request --padding 6 --SetDockType true --SetPartialStrut true --expand true --monitor 1 --transparent true --alpha 0 " ++ "--tint 0x" ++ xmobarColorStr ++ " --height 17") -- restart trayer
     setANewBGOnce --set a bg! owo
