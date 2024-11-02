@@ -241,6 +241,7 @@ instance HasConfigFile Picom where
     [ "inactive-opacity = 0.8"
     , "frame-opacity = 0.8"
     , "active-opacity = 0.8"
+    , "backend = \"xrender\""
     ]
 instance Configurable Picom where
   data Mode Picom = PicomOpacityInc Rational | PicomOpacityDec Rational deriving Show
@@ -709,7 +710,7 @@ main = do
                   , ppSep = " "
                   }
     --, handleEventHook = <> handleEventHook defaults
-    } 
+    }
     --`additionalKeys`
     --[ (
 -- A structure containing your configuration settings, overriding
